@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/scrcpy_connection.dart';
 import '../models/scrcpy_message.dart' as models;
 import '../services/h264_decoder.dart';
+import 'shell_screen.dart';
+import 'file_upload_screen.dart';
 
 class ScreenViewer extends StatefulWidget {
   final ScrcpyConnection connection;
@@ -113,8 +115,7 @@ class _ScreenViewerState extends State<ScreenViewer> {
               style: const TextStyle(color: Colors.white70, fontSize: 14),
             ),
             actions: [
-              IconButton(icon: const Icon(Icons.keyboard, color: Colors.white), onPressed: _showKeyboard),
-              IconButton(icon: const Icon(Icons.settings, color: Colors.white), onPressed: _showSettings),
+              IconButton(icon: const Icon(Icons.more_vert, color: Colors.white), onPressed: _showTools),
             ],
           ),
           body: Column(
@@ -185,27 +186,7 @@ class _ScreenViewerState extends State<ScreenViewer> {
     widget.connection.sendTouchEvent(models.TouchEvent(action: action, pointerId: 0, positionX: deviceX, positionY: deviceY, screenWidth: tw, screenHeight: th));
   }
 
-  void _showKeyboard() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Send Key'),
-        content: TextField(
-          autofocus: true,
-          onSubmitted: (value) {
-            for (var char in value.runes) {
-              widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionDown, keycode: char));
-              widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionUp, keycode: char));
-            }
-            Navigator.pop(ctx);
-          },
-          decoration: const InputDecoration(hintText: 'Type text or key', border: OutlineInputBorder()),
-        ),
-      ),
-    );
-  }
-
-  void _showSettings() {
+  void _showTools() {
     showModalBottomSheet(
       context: context,
       builder: (ctx) => Container(
@@ -213,13 +194,22 @@ class _ScreenViewerState extends State<ScreenViewer> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(leading: const Icon(Icons.info), title: const Text('Device Info'), subtitle: Text('Resolution: ${_screenSize.width.toInt()}x${_screenSize.height.toInt()}')),
-            ListTile(leading: const Icon(Icons.power_settings_new, color: Colors.red), title: const Text('Power / Screen On'), onTap: () { widget.connection.sendBackOrScreenOn(); Navigator.pop(ctx); }),
-            ListTile(leading: const Icon(Icons.arrow_back), title: const Text('Back'), onTap: () {
+            ListTile(leading: const Icon(Icons.terminal, color: Colors.green), title: const Text('ADB Shell'), onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => ShellScreen(host: widget.host, port: widget.port)));
+            }),
+            ListTile(leading: const Icon(Icons.upload_file, color: Colors.blue), title: const Text('上传文件'), onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => FileUploadScreen(host: widget.host, port: widget.port)));
+            }),
+            const Divider(),
+            ListTile(leading: const Icon(Icons.arrow_back), title: const Text('返回'), onTap: () {
               widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionDown, keycode: models.AndroidKeycode.back));
               widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionUp, keycode: models.AndroidKeycode.back));
               Navigator.pop(ctx);
             }),
+            ListTile(leading: const Icon(Icons.power_settings_new, color: Colors.red), title: const Text('唤醒屏幕'), onTap: () { widget.connection.sendBackOrScreenOn(); Navigator.pop(ctx); }),
+            ListTile(leading: const Icon(Icons.info_outline), title: const Text('设备信息'), subtitle: Text('${_screenSize.width.toInt()}x${_screenSize.height.toInt()}')),
           ],
         ),
       ),
