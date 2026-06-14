@@ -1,0 +1,16 @@
+build/
+.dart_tool/
+**/.gradle/
+*.iml
+.idea/
+local.properties
+downloads/
+video_pipeline.html
+*.apk
+*.png
+*.hprof
+test_*.py
+bridge.py
+.flutter-plugins-dependencies
+.flutter-plugins
+*.hprof
