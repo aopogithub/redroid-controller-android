@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/adb_client.dart';
 import '../services/scrcpy_connection.dart';
 import 'screen_viewer.dart';
 
@@ -85,9 +86,18 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     await conn.connect(host: host, port: port);
   }
 
-  void _saveDevice(String host, int port) {
-    final conn = context.read<ScrcpyConnection>();
-    final deviceName = conn.deviceInfo?.deviceName ?? host;
+  void _saveDevice(String host, int port) async {
+    // Get device name from ADB settings
+    String deviceName;
+    try {
+      deviceName = await AdbClient.execShell(host, port, 'settings get global device_name');
+      deviceName = deviceName.trim();
+      if (deviceName.isEmpty || deviceName == 'null') {
+        deviceName = host;
+      }
+    } catch (_) {
+      deviceName = host;
+    }
     final existing = _savedDevices.indexWhere(
       (d) => d.host == host && d.port == port,
     );

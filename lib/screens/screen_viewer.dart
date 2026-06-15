@@ -239,7 +239,8 @@ class _ScreenViewerState extends State<ScreenViewer> {
             child: Align(
               alignment: Alignment.centerRight,
               child: Material(
-                color: const Color(0xFF1E1E1E),
+                color: const Color(0xFF303030),
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), bottomLeft: Radius.circular(12)),
                 child: SafeArea(
                   child: SizedBox(
                     width: 220,
