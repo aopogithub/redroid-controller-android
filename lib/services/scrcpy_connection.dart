@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'adb_client.dart';
+import 'sps_parser.dart';
 
 enum ScrcpyState { disconnected, connecting, connected, error }
 
@@ -87,6 +88,7 @@ class ScrcpyConnection with ChangeNotifier {
   final _deviceInfoController = StreamController<DeviceInfo>.broadcast();
   final _videoFrameController = StreamController<Uint8List>.broadcast();
   final _errorController = StreamController<String>.broadcast();
+  final _resolutionChangeController = StreamController<({int width, int height})>.broadcast();
 
   ScrcpyState get state => _state;
   DeviceInfo? get deviceInfo => _deviceInfo;
@@ -94,6 +96,7 @@ class ScrcpyConnection with ChangeNotifier {
   Stream<DeviceInfo> get deviceInfoStream => _deviceInfoController.stream;
   Stream<Uint8List> get videoFrameStream => _videoFrameController.stream;
   Stream<String> get errorStream => _errorController.stream;
+  Stream<({int width, int height})> get resolutionChangeStream => _resolutionChangeController.stream;
 
   void _log(String msg) => _errorController.add(msg);
 
@@ -180,6 +183,13 @@ class ScrcpyConnection with ChangeNotifier {
         }
       } catch (e) {
         _log('  → 查询分辨率失败: $e');
+      }
+
+      // Set DeviceInfo early with wm size result
+      if (queriedWidth != null && queriedHeight != null) {
+        _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: queriedWidth!, videoHeight: queriedHeight!);
+        _deviceInfoController.add(_deviceInfo!);
+        _log('  → DeviceInfo 已设置: ${queriedWidth}x$queriedHeight');
       }
 
       // Step 5: Start scrcpy server with tunnel_forward=true
@@ -428,12 +438,14 @@ class ScrcpyConnection with ChangeNotifier {
         final codecId = probe.buffer.asByteData().getUint32(64, Endian.little);
         final width = probe.buffer.asByteData().getUint32(68, Endian.little);
         _log('  → deviceName=$deviceName codec=$codecId width=$width');
-        final height = qH ?? 1280;
+        final height = qH ?? _deviceInfo?.videoHeight ?? 1280;
         _deviceInfo = DeviceInfo(deviceName: deviceName, videoWidth: width, videoHeight: height);
         _deviceInfoController.add(_deviceInfo!);
       } else {
         _log('  → 无 device header');
-        _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: qW ?? 720, videoHeight: qH ?? 1280);
+        final w = qW ?? _deviceInfo?.videoWidth ?? 720;
+        final h = qH ?? _deviceInfo?.videoHeight ?? 1280;
+        _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: w, videoHeight: h);
         _deviceInfoController.add(_deviceInfo!);
       }
 
@@ -611,7 +623,9 @@ class ScrcpyConnection with ChangeNotifier {
         final nameBytes = await ensureBytes(63);
         final name = String.fromCharCodes([firstByte, ...nameBytes.where((b) => b >= 32 && b < 127)]).trimRight();
         _log('  → device: $name');
-        _deviceInfo = DeviceInfo(deviceName: name.isEmpty ? 'redroid' : name, videoWidth: qW ?? 720, videoHeight: qH ?? 1280);
+        final w = qW ?? _deviceInfo?.videoWidth ?? 720;
+        final h = qH ?? _deviceInfo?.videoHeight ?? 1280;
+        _deviceInfo = DeviceInfo(deviceName: name.isEmpty ? 'redroid' : name, videoWidth: w, videoHeight: h);
       } else {
         // Not printable → no device name, first byte is PTS data
         _log('  → 无 device header');
@@ -619,7 +633,9 @@ class ScrcpyConnection with ChangeNotifier {
         buf.clear();
         buf.add(probe);
         buf.add(prev);
-        _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: qW ?? 720, videoHeight: qH ?? 1280);
+        final w = qW ?? _deviceInfo?.videoWidth ?? 720;
+        final h = qH ?? _deviceInfo?.videoHeight ?? 1280;
+        _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: w, videoHeight: h);
       }
       _deviceInfoController.add(_deviceInfo!);
 
@@ -646,6 +662,10 @@ class ScrcpyConnection with ChangeNotifier {
               : frameData.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
           _log('  → 帧 #$frameCount: pts=$pts size=$frameSize first8=$first8');
         }
+
+        // SPS resolution detection
+        _checkSpsResolution(frameData, frameCount);
+
         _videoFrameController.add(frameData);
       }
     } catch (e) {
@@ -723,6 +743,37 @@ class ScrcpyConnection with ChangeNotifier {
       _log('✗ $msg');
       _updateState(ScrcpyState.error);
       disconnect();
+    }
+  }
+
+  int? _lastSpsWidth;
+  int? _lastSpsHeight;
+
+  /// Scan a video frame for SPS NAL units and update resolution if changed.
+  void _checkSpsResolution(Uint8List frameData, int frameCount) {
+    for (final nal in SpsParser.findNalUnits(frameData)) {
+      if (nal.type == 7) { // SPS
+        final res = SpsParser.parseSps(nal.data);
+        if (res != null) {
+          if (_lastSpsWidth != res.width || _lastSpsHeight != res.height) {
+            _lastSpsWidth = res.width;
+            _lastSpsHeight = res.height;
+            _log('  → SPS 分辨率变化: ${res.width}x${res.height}');
+            _resolutionChangeController.add((width: res.width, height: res.height));
+            // Update device info if resolution actually changed
+            if (_deviceInfo != null &&
+                (_deviceInfo!.videoWidth != res.width || _deviceInfo!.videoHeight != res.height)) {
+              _deviceInfo = DeviceInfo(
+                deviceName: _deviceInfo!.deviceName,
+                videoWidth: res.width,
+                videoHeight: res.height,
+              );
+              _deviceInfoController.add(_deviceInfo!);
+              _log('  → DeviceInfo 已更新: ${res.width}x${res.height}');
+            }
+          }
+        }
+      }
     }
   }
 
@@ -871,6 +922,7 @@ class ScrcpyConnection with ChangeNotifier {
     disconnect();
     _stateController.close(); _deviceInfoController.close();
     _videoFrameController.close(); _errorController.close();
+    _resolutionChangeController.close();
     super.dispose();
   }
 }

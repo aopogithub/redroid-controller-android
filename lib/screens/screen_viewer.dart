@@ -73,6 +73,13 @@ class _ScreenViewerState extends State<ScreenViewer> {
         }
       });
 
+      // Resolution change (from SPS detection)
+      widget.connection.resolutionChangeStream.listen((res) {
+        _screenSize = Size(res.width.toDouble(), res.height.toDouble());
+        _decoder.updateSize(res.width, res.height);
+        setState(() {});
+      });
+
       // Native log polling
       Future.doWhile(() async {
         await Future.delayed(const Duration(seconds: 2));
