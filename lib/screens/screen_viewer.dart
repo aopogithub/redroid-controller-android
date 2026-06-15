@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/scrcpy_connection.dart';
 import '../models/scrcpy_message.dart' as models;
 import '../services/h264_decoder.dart';
@@ -111,11 +112,20 @@ class _ScreenViewerState extends State<ScreenViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    
+    // Enter/exit fullscreen based on orientation
+    if (isLandscape) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+
     return Stack(
       children: [
         Scaffold(
           backgroundColor: Colors.black,
-          appBar: AppBar(
+          appBar: isLandscape ? null : AppBar(
             backgroundColor: Colors.black,
             title: Text(
               '📱 ${widget.connection.deviceInfo?.deviceName ?? 'Redroid'}',
@@ -181,6 +191,22 @@ class _ScreenViewerState extends State<ScreenViewer> {
               ),
             ),
           ),
+
+        // Floating tools button in landscape mode
+        if (isLandscape && _isInitialized)
+          Positioned(
+            top: 8,
+            right: 8,
+            child: GestureDetector(
+              onLongPress: () => Navigator.pop(context),
+              child: FloatingActionButton(
+                mini: true,
+                backgroundColor: Colors.black54,
+                onPressed: _showTools,
+                child: const Icon(Icons.more_vert, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -194,37 +220,76 @@ class _ScreenViewerState extends State<ScreenViewer> {
   }
 
   void _showTools() {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(leading: const Icon(Icons.terminal, color: Colors.green), title: const Text('ADB Shell'), onTap: () {
-              Navigator.pop(ctx);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => ShellScreen(host: widget.host, port: widget.port)));
-            }),
-            ListTile(leading: const Icon(Icons.upload_file, color: Colors.blue), title: const Text('上传文件'), onTap: () {
-              Navigator.pop(ctx);
-              Navigator.push(context, MaterialPageRoute(builder: (_) => FileUploadScreen(host: widget.host, port: widget.port)));
-            }),
-            const Divider(),
-            ListTile(leading: const Icon(Icons.arrow_back), title: const Text('返回'), onTap: () {
-              widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionDown, keycode: models.AndroidKeycode.back));
-              widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionUp, keycode: models.AndroidKeycode.back));
-              Navigator.pop(ctx);
-            }),
-            ListTile(leading: const Icon(Icons.power_settings_new, color: Colors.red), title: const Text('唤醒屏幕'), onTap: () { widget.connection.sendBackOrScreenOn(); Navigator.pop(ctx); }),
-            ListTile(leading: const Icon(Icons.info_outline), title: const Text('设备信息'), subtitle: Text('${_screenSize.width.toInt()}x${_screenSize.height.toInt()}')),
-          ],
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final menuItems = _buildMenuItems();
+
+    if (isLandscape) {
+      // Right side slide panel in landscape
+      showGeneralDialog(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: 'tools',
+        barrierColor: Colors.black38,
+        transitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (_, __, ___) => const SizedBox.shrink(),
+        transitionBuilder: (ctx, anim, _, __) {
+          return SlideTransition(
+            position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
+                .animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Material(
+                color: const Color(0xFF1E1E1E),
+                child: SafeArea(
+                  child: SizedBox(
+                    width: 220,
+                    child: ListView(padding: const EdgeInsets.symmetric(vertical: 8), children: menuItems),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      // Bottom sheet in portrait
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (ctx) => SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(mainAxisSize: MainAxisSize.min, children: menuItems),
+          ),
         ),
-      ),
-    );
+      );
+    }
+  }
+
+  List<Widget> _buildMenuItems() {
+    return [
+      ListTile(leading: const Icon(Icons.terminal, color: Colors.green), title: const Text('ADB Shell'), onTap: () {
+        Navigator.pop(context);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => ShellScreen(host: widget.host, port: widget.port)));
+      }),
+      ListTile(leading: const Icon(Icons.upload_file, color: Colors.blue), title: const Text('上传文件'), onTap: () {
+        Navigator.pop(context);
+        Navigator.push(context, MaterialPageRoute(builder: (_) => FileUploadScreen(host: widget.host, port: widget.port)));
+      }),
+      const Divider(),
+      ListTile(leading: const Icon(Icons.arrow_back), title: const Text('返回'), onTap: () {
+        widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionDown, keycode: models.AndroidKeycode.back));
+        widget.connection.sendKeyEvent(models.ScrcpyKeyEvent(action: models.AndroidKeyEvent.actionUp, keycode: models.AndroidKeycode.back));
+        Navigator.pop(context);
+      }),
+      ListTile(leading: const Icon(Icons.power_settings_new, color: Colors.red), title: const Text('唤醒屏幕'), onTap: () { widget.connection.sendBackOrScreenOn(); Navigator.pop(context); }),
+      ListTile(leading: const Icon(Icons.info_outline), title: const Text('设备信息'), subtitle: Text('${_screenSize.width.toInt()}x${_screenSize.height.toInt()}')),
+    ];
   }
 
   @override
   void dispose() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _decoder.dispose();
     widget.connection.disconnect();
     super.dispose();
