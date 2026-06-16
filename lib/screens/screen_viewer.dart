@@ -44,11 +44,16 @@ class _ScreenViewerState extends State<ScreenViewer> {
   bool _decoding = false;
   Uint8List? _pendingFrame;
   // Timing diagnostics
-  int _lastFrameArrivalUs = 0;  // µs timestamp of last frame arrival
-  int _frameIntervalUs = 0;     // µs between last two frame arrivals
-  int _maxIntervalUs = 0;       // max interval in current window
-  int _decodeTimeUs = 0;        // last decode duration in µs
-  int _maxDecodeUs = 0;         // max decode duration in current window
+  int _lastFrameArrivalUs = 0;
+  int _frameIntervalUs = 0;     // interval between last two frames
+  int _decodeTimeUs = 0;        // last decode duration
+  int _maxDecodeUs = 0;         // max decode in current window
+  // FPS tracking (1-second window)
+  int _windowStartUs = 0;
+  int _windowStartIn = 0;
+  int _windowStartRendered = 0;
+  double _currentFps = 0;       // actual rendered FPS
+  double _currentInFps = 0;     // incoming frame rate
 
   @override
   void initState() {
@@ -72,7 +77,6 @@ class _ScreenViewerState extends State<ScreenViewer> {
         _frameCount++;
         if (_lastFrameArrivalUs > 0) {
           _frameIntervalUs = now - _lastFrameArrivalUs;
-          if (_frameIntervalUs > _maxIntervalUs) _maxIntervalUs = _frameIntervalUs;
         }
         _lastFrameArrivalUs = now;
         if (_decoding) {
@@ -82,19 +86,29 @@ class _ScreenViewerState extends State<ScreenViewer> {
         _decodeFrame(frame);
       });
 
-      // Diag ticker — 2 Hz instead of per-frame
+      // Diag ticker — 2 Hz
+      _windowStartUs = DateTime.now().microsecondsSinceEpoch;
+      _windowStartIn = 0;
+      _windowStartRendered = 0;
       _diagTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (!mounted) return;
-        final intervalMs = (_frameIntervalUs / 1000).toStringAsFixed(1);
-        final maxIntervalMs = (_maxIntervalUs / 1000).toStringAsFixed(0);
+        final now = DateTime.now().microsecondsSinceEpoch;
+        final elapsedSec = (now - _windowStartUs) / 1000000.0;
+        if (elapsedSec > 0) {
+          _currentInFps = (_frameCount - _windowStartIn) / elapsedSec;
+          _currentFps = (_renderedCount - _windowStartRendered) / elapsedSec;
+          _windowStartUs = now;
+          _windowStartIn = _frameCount;
+          _windowStartRendered = _renderedCount;
+        }
         final decodeMs = (_decodeTimeUs / 1000).toStringAsFixed(1);
         final maxDecodeMs = (_maxDecodeUs / 1000).toStringAsFixed(0);
-        _diagLine1 = 'in=$_frameCount out=$_renderedCount skip=$_skippedCount '
+        _diagLine1 = 'in=${_currentInFps.toStringAsFixed(0)}fps '
+            'out=${_currentFps.toStringAsFixed(0)}fps '
+            'skip=$_skippedCount '
             '${_screenSize.width.toInt()}x${_screenSize.height.toInt()}';
-        _diagLine2 = 'interval=${intervalMs}ms(max=${maxIntervalMs}) '
-            'decode=${decodeMs}ms(max=${maxDecodeMs})';
-        // Reset max for next window
-        _maxIntervalUs = 0;
+        _diagLine2 = 'decode=${decodeMs}ms(max=${maxDecodeMs}) '
+            'interval=${(_frameIntervalUs / 1000).toStringAsFixed(0)}ms';
         _maxDecodeUs = 0;
         _diagTick.value++;
       });
