@@ -124,6 +124,8 @@ class ScrcpyConnection with ChangeNotifier {
       await adb.connect(host, port);
       _log('  → ADB 已连接');
 
+      int? queriedWidth, queriedHeight;
+
       try {
         // Step 2: Kill any existing scrcpy server
         await adb.shell('pkill -9 -f scrcpy 2>/dev/null')
@@ -157,7 +159,6 @@ class ScrcpyConnection with ChangeNotifier {
 
         // Step 4: Query device resolution
         _log('④ 查询设备分辨率 ...');
-        int? queriedWidth, queriedHeight;
         try {
           final wmSize = await adb.shell('wm size')
               .timeout(const Duration(seconds: 3), onTimeout: () => '');
