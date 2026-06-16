@@ -216,6 +216,9 @@ class ScrcpyConnection with ChangeNotifier {
       if (serverOpenResp.cmd != OKAY_V) throw Exception('Server OPEN failed');
       _log('  → server 命令已发送');
 
+      // Wait for server to initialize (v4.0 jar is 716KB, needs time to start)
+      await Future.delayed(const Duration(seconds: 2));
+
       // Read server output in background
       _readServerOutput(serverReader, serverSocket);
 
