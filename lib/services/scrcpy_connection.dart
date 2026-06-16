@@ -126,7 +126,7 @@ class ScrcpyConnection with ChangeNotifier {
 
       try {
         // Step 2: Kill any existing scrcpy server
-        adb.shell('pkill -9 -f scrcpy 2>/dev/null')
+        await adb.shell('pkill -9 -f scrcpy 2>/dev/null')
             .timeout(const Duration(seconds: 2), onTimeout: () => '')
             .catchError((_) => '');
         await Future.delayed(const Duration(milliseconds: 200));
@@ -243,30 +243,24 @@ class ScrcpyConnection with ChangeNotifier {
         throw Exception('无法连接 abstract socket [$socketName]');
       }
 
-      // Step 7: Open control connection (manual read, then write-only)
+      // Step 7: Open control connection
       _log('⑦ 连接 control socket ...');
       try {
         final ctrlSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 10));
+        final ctrlReader = _SocketReader(ctrlSocket);
 
-        // Manual ADB handshake: send CNXN, read 24-byte response manually
+        // ADB handshake
         await _sendAdbMsg(ctrlSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
-        // Read CNXN response (24 bytes) directly from socket
-        final cnxnData = await ctrlSocket.first.timeout(const Duration(seconds: 5));
-        if (cnxnData.length < 24) throw Exception('Ctrl CNXN too short');
+        final cnxnResp = await _recvAdbMsg(ctrlReader);
+        if (cnxnResp.cmd != CNXN_V) throw Exception('Ctrl CNXN failed');
 
-        // Send OPEN
+        // Open abstract socket
         await _sendAdbMsg(ctrlSocket, OPEN_V, 3, 0, utf8.encode('localabstract:$socketName\x00'));
-        // Read OKAY response (24 bytes) directly from socket
-        final openData = await ctrlSocket.first.timeout(const Duration(seconds: 5));
-        if (openData.length < 24) throw Exception('Ctrl OPEN too short');
-        final openBd = openData.buffer.asByteData();
-        final openCmd = openBd.getUint32(0, Endian.little);
-        final openArg0 = openBd.getUint32(4, Endian.little);
-        _log('  → ctrl OPEN: cmd=0x${openCmd.toRadixString(16)} arg0=$openArg0');
-        if (openCmd != OKAY_V) throw Exception('Ctrl OPEN failed');
+        final openResp = await _recvAdbMsg(ctrlReader);
+        if (openResp.cmd != OKAY_V) throw Exception('Ctrl OPEN failed');
 
         _controlSocket = ctrlSocket;
-        _controlRemoteId = openArg0;
+        _controlRemoteId = openResp.arg0;
         _log('  ✓ control 已连接 (remote_id=$_controlRemoteId)');
         _controlSub?.cancel();
         _controlSub = ctrlSocket.listen((_) {}, onError: (_) {}, onDone: () {});
