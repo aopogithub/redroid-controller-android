@@ -202,7 +202,7 @@ class ScrcpyConnection with ChangeNotifier {
       final serverCnxnResp = await _recvAdbMsg(serverReader);
       if (serverCnxnResp.cmd != CNXN_V) throw Exception('Server CNXN failed');
 
-      final serverCmd = 'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 2.6.1 scid=$scid log_level=info video=true audio=false control=true tunnel_forward=true cleanup=false send_frame_meta=true send_dummy_byte=false send_codec_meta=false send_device_meta=true max_fps=30 video_bit_rate=4000000';
+      final serverCmd = 'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 4.0 scid=$scid log_level=info video=true audio=false control=true tunnel_forward=true cleanup=false send_frame_meta=true send_dummy_byte=false send_stream_meta=true send_device_meta=true max_fps=30 video_bit_rate=4000000';
       _log('  → shell: $serverCmd');
       await _sendAdbMsg(serverSocket, OPEN_V, 1, 0, utf8.encode('shell:$serverCmd\x00'));
       final serverOpenResp = await _recvAdbMsg(serverReader);
@@ -613,6 +613,7 @@ class ScrcpyConnection with ChangeNotifier {
         return result;
       }
 
+      // v4.0 stream: [device_name(64B)] [codec_id(4B)] [SESSION/Frames...]
       // Smart device name detection: check first byte
       final probe = await ensureBytes(1);
       final firstByte = probe[0];
@@ -626,8 +627,13 @@ class ScrcpyConnection with ChangeNotifier {
         final w = qW ?? _deviceInfo?.videoWidth ?? 720;
         final h = qH ?? _deviceInfo?.videoHeight ?? 1280;
         _deviceInfo = DeviceInfo(deviceName: name.isEmpty ? 'redroid' : name, videoWidth: w, videoHeight: h);
+
+        // v4.0: read codec header (4B codec ID) if send_stream_meta=true
+        final codecProbe = await ensureBytes(4);
+        final codecId = codecProbe.buffer.asByteData().getUint32(0, Endian.big);
+        _log('  → codec ID: $codecId');
       } else {
-        // Not printable → no device name, first byte is PTS data
+        // Not printable → no device name
         _log('  → 无 device header');
         final prev = buf.toBytes();
         buf.clear();
@@ -639,18 +645,48 @@ class ScrcpyConnection with ChangeNotifier {
       }
       _deviceInfoController.add(_deviceInfo!);
 
-      // Read frames: PTS(8 BE) + size(4 BE) + data
+      // Read frames — v4.0 format:
+      // SESSION packet: flags(4B) + width(4B) + height(4B) = 12B, bit31 of flags set
+      // Frame: PTS+Flags(8B BE) + Size(4B BE) + Data, PTS bits 63-61 are flags
       _log('⑧ 开始接收视频帧...');
       while (_state == ScrcpyState.connected) {
-        final ptsBytes = await ensureBytes(8);
-        final pts = ptsBytes.buffer.asByteData().getInt64(0, Endian.big);
+        // Peek first 4 bytes to distinguish SESSION vs frame
+        final first4 = await ensureBytes(4);
+        final first4Val = first4.buffer.asByteData().getUint32(0, Endian.big);
+
+        if (first4Val & 0x80000000 != 0) {
+          // SESSION packet: this 4B is flags, read width(4B) + height(4B)
+          final whBytes = await ensureBytes(8);
+          final whBd = whBytes.buffer.asByteData();
+          final w = whBd.getUint32(0, Endian.big);
+          final h = whBd.getUint32(4, Endian.big);
+          if (w > 0 && h > 0 && w < 10000 && h < 10000) {
+            _log('  → SESSION: ${w}x$h');
+            _resolutionChangeController.add((width: w.toInt(), height: h.toInt()));
+            if (_deviceInfo != null &&
+                (_deviceInfo!.videoWidth != w.toInt() || _deviceInfo!.videoHeight != h.toInt())) {
+              _deviceInfo = DeviceInfo(
+                deviceName: _deviceInfo!.deviceName,
+                videoWidth: w.toInt(),
+                videoHeight: h.toInt(),
+              );
+              _deviceInfoController.add(_deviceInfo!);
+            }
+          }
+          continue;
+        }
+
+        // Frame: first 4B is high 4 bytes of PTS+Flags, read remaining 4B of PTS
+        final ptsLow = await ensureBytes(4);
+        final ptsRaw = (first4Val.toInt() << 32) | ptsLow.buffer.asByteData().getUint32(0, Endian.big);
+        // Mask off bits 63-61 (SESSION/CONFIG/KEY_FRAME flags)
+        final pts = ptsRaw & 0x1FFFFFFFFFFFFFFF;
+
         final sizeBytes = await ensureBytes(4);
         final frameSize = sizeBytes.buffer.asByteData().getUint32(0, Endian.big);
 
         if (frameSize == 0 || frameSize > 10 * 1024 * 1024) {
           _log('  ⚠ 异常帧: pts=$pts size=$frameSize');
-          _log('  ⚠ pts hex: ${ptsBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
-          _log('  ⚠ size hex: ${sizeBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
           continue;
         }
 
@@ -662,9 +698,6 @@ class ScrcpyConnection with ChangeNotifier {
               : frameData.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
           _log('  → 帧 #$frameCount: pts=$pts size=$frameSize first8=$first8');
         }
-
-        // SPS resolution detection
-        _checkSpsResolution(frameData, frameCount);
 
         _videoFrameController.add(frameData);
       }
