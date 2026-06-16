@@ -42,6 +42,12 @@ class _ScreenViewerState extends State<ScreenViewer> {
   Timer? _diagTimer;
   bool _decoding = false;
   Uint8List? _pendingFrame;
+  // Timing diagnostics
+  int _lastFrameArrivalUs = 0;  // µs timestamp of last frame arrival
+  int _frameIntervalUs = 0;     // µs between last two frame arrivals
+  int _maxIntervalUs = 0;       // max interval in current window
+  int _decodeTimeUs = 0;        // last decode duration in µs
+  int _maxDecodeUs = 0;         // max decode duration in current window
 
   @override
   void initState() {
@@ -61,7 +67,13 @@ class _ScreenViewerState extends State<ScreenViewer> {
 
       // Feed frames — queue latest, skip intermediates, NO flush
       widget.connection.videoFrameStream.listen((frame) {
+        final now = DateTime.now().microsecondsSinceEpoch;
         _frameCount++;
+        if (_lastFrameArrivalUs > 0) {
+          _frameIntervalUs = now - _lastFrameArrivalUs;
+          if (_frameIntervalUs > _maxIntervalUs) _maxIntervalUs = _frameIntervalUs;
+        }
+        _lastFrameArrivalUs = now;
         if (_decoding) {
           _pendingFrame = frame;
           return;
@@ -72,8 +84,17 @@ class _ScreenViewerState extends State<ScreenViewer> {
       // Diag ticker — 2 Hz instead of per-frame
       _diagTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
         if (!mounted) return;
+        final intervalMs = (_frameIntervalUs / 1000).toStringAsFixed(1);
+        final maxIntervalMs = (_maxIntervalUs / 1000).toStringAsFixed(0);
+        final decodeMs = (_decodeTimeUs / 1000).toStringAsFixed(1);
+        final maxDecodeMs = (_maxDecodeUs / 1000).toStringAsFixed(0);
         _diagMsg = 'in=$_frameCount out=$_renderedCount skip=$_skippedCount '
+            'interval=${intervalMs}ms(max=${maxIntervalMs}) '
+            'decode=${decodeMs}ms(max=${maxDecodeMs}) '
             '${_screenSize.width.toInt()}x${_screenSize.height.toInt()}';
+        // Reset max for next window
+        _maxIntervalUs = 0;
+        _maxDecodeUs = 0;
         _diagTick.value++;
       });
 
@@ -205,6 +226,7 @@ class _ScreenViewerState extends State<ScreenViewer> {
 
   void _decodeFrame(Uint8List frame) {
     _decoding = true;
+    final startUs = DateTime.now().microsecondsSinceEpoch;
     _decoder.decode(frame, width: _screenSize.width.toInt(), height: _screenSize.height.toInt())
         .then((res) {
           final rendered = res['rendered'] as int? ?? 0;
@@ -212,6 +234,9 @@ class _ScreenViewerState extends State<ScreenViewer> {
         })
         .catchError((_) {})
         .whenComplete(() {
+          final elapsed = DateTime.now().microsecondsSinceEpoch - startUs;
+          _decodeTimeUs = elapsed;
+          if (elapsed > _maxDecodeUs) _maxDecodeUs = elapsed;
           final next = _pendingFrame;
           _pendingFrame = null;
           _decoding = false;
