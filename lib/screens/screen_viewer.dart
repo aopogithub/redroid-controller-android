@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,14 +29,19 @@ class _ScreenViewerState extends State<ScreenViewer> {
   Offset? _touchStartPos;
   Offset? _lastTouchPos;
   String _statusMsg = '';
-  String _diagMsg = '';
-  String _connLog = '';
-  String _nativeLog = '';
-  int _frameCount = 0;
-  int _renderedCount = 0;
   int _touchWidth = 0;
   int _touchHeight = 0;
   bool _reconnecting = false;
+
+  // Perf counters
+  int _frameCount = 0;
+  int _renderedCount = 0;
+  int _skippedCount = 0;
+  String _diagMsg = '';
+  final ValueNotifier<int> _diagTick = ValueNotifier(0);
+  Timer? _diagTimer;
+  bool _decoding = false;
+  Uint8List? _pendingFrame;
 
   @override
   void initState() {
@@ -53,43 +59,29 @@ class _ScreenViewerState extends State<ScreenViewer> {
       _textureId = await _decoder.initialize(width, height);
       setState(() { _isInitialized = true; });
 
-      // Feed frames to native decoder
-      widget.connection.videoFrameStream.listen((frame) async {
-        try {
-          final res = await _decoder.decode(frame, width: _screenSize.width.toInt(), height: _screenSize.height.toInt());
-          final rendered = res['rendered'] as int? ?? 0;
-          final decW = res['decW'] as int? ?? 0;
-          final decH = res['decH'] as int? ?? 0;
-          _frameCount++;
-          _renderedCount += rendered;
-          _diagMsg = '$_frameCount/$_renderedCount ${decW}x$decH';
-          setState(() {});
-        } catch (_) {}
+      // Feed frames — queue latest, skip intermediates, NO flush
+      widget.connection.videoFrameStream.listen((frame) {
+        _frameCount++;
+        if (_decoding) {
+          _pendingFrame = frame;
+          return;
+        }
+        _decodeFrame(frame);
       });
 
-      // Connection logs
-      widget.connection.errorStream.listen((msg) {
-        if (msg.contains('control') || msg.contains('ctrl') || msg.contains('touch') || msg.contains('⚠')) {
-          setState(() { _connLog = msg; });
-        }
+      // Diag ticker — 2 Hz instead of per-frame
+      _diagTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+        if (!mounted) return;
+        _diagMsg = 'in=$_frameCount out=$_renderedCount skip=$_skippedCount '
+            '${_screenSize.width.toInt()}x${_screenSize.height.toInt()}';
+        _diagTick.value++;
       });
 
       // Resolution change (from SPS detection)
       widget.connection.resolutionChangeStream.listen((res) {
         _screenSize = Size(res.width.toDouble(), res.height.toDouble());
         _decoder.updateSize(res.width, res.height);
-        setState(() {});
-      });
-
-      // Native log polling
-      Future.doWhile(() async {
-        await Future.delayed(const Duration(seconds: 2));
-        if (!mounted) return false;
-        try {
-          final log = await _decoder.getLog();
-          if (log.isNotEmpty) setState(() { _nativeLog = log; });
-        } catch (_) {}
-        return mounted;
+        if (mounted) setState(() {});
       });
 
       // Auto-reconnect on disconnect
@@ -164,12 +156,12 @@ class _ScreenViewerState extends State<ScreenViewer> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   color: Colors.black87,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('帧=$_frameCount 渲染=$_renderedCount ${_diagMsg.isNotEmpty ? _diagMsg : ''}', style: const TextStyle(color: Colors.white54, fontSize: 10)),
-                    ],
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _diagTick,
+                    builder: (_, __, ___) => Text(
+                      _diagMsg,
+                      style: const TextStyle(color: Colors.white54, fontSize: 10),
+                    ),
                   ),
                 ),
             ],
@@ -209,6 +201,25 @@ class _ScreenViewerState extends State<ScreenViewer> {
           ),
       ],
     );
+  }
+
+  void _decodeFrame(Uint8List frame) {
+    _decoding = true;
+    _decoder.decode(frame, width: _screenSize.width.toInt(), height: _screenSize.height.toInt())
+        .then((res) {
+          final rendered = res['rendered'] as int? ?? 0;
+          _renderedCount += rendered;
+        })
+        .catchError((_) {})
+        .whenComplete(() {
+          final next = _pendingFrame;
+          _pendingFrame = null;
+          _decoding = false;
+          if (next != null && mounted) {
+            _skippedCount++;
+            _decodeFrame(next);
+          }
+        });
   }
 
   void _handleTouch({required int action, required Offset position}) {
@@ -290,6 +301,8 @@ class _ScreenViewerState extends State<ScreenViewer> {
 
   @override
   void dispose() {
+    _diagTimer?.cancel();
+    _diagTick.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _decoder.dispose();
     widget.connection.disconnect();
