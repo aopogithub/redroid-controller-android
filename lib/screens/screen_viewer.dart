@@ -37,7 +37,8 @@ class _ScreenViewerState extends State<ScreenViewer> {
   int _frameCount = 0;
   int _renderedCount = 0;
   int _skippedCount = 0;
-  String _diagMsg = '';
+  String _diagLine1 = '';
+  String _diagLine2 = '';
   final ValueNotifier<int> _diagTick = ValueNotifier(0);
   Timer? _diagTimer;
   bool _decoding = false;
@@ -88,10 +89,10 @@ class _ScreenViewerState extends State<ScreenViewer> {
         final maxIntervalMs = (_maxIntervalUs / 1000).toStringAsFixed(0);
         final decodeMs = (_decodeTimeUs / 1000).toStringAsFixed(1);
         final maxDecodeMs = (_maxDecodeUs / 1000).toStringAsFixed(0);
-        _diagMsg = 'in=$_frameCount out=$_renderedCount skip=$_skippedCount '
-            'interval=${intervalMs}ms(max=${maxIntervalMs}) '
-            'decode=${decodeMs}ms(max=${maxDecodeMs}) '
+        _diagLine1 = 'in=$_frameCount out=$_renderedCount skip=$_skippedCount '
             '${_screenSize.width.toInt()}x${_screenSize.height.toInt()}';
+        _diagLine2 = 'interval=${intervalMs}ms(max=${maxIntervalMs}) '
+            'decode=${decodeMs}ms(max=${maxDecodeMs})';
         // Reset max for next window
         _maxIntervalUs = 0;
         _maxDecodeUs = 0;
@@ -179,9 +180,13 @@ class _ScreenViewerState extends State<ScreenViewer> {
                   color: Colors.black87,
                   child: ValueListenableBuilder<int>(
                     valueListenable: _diagTick,
-                    builder: (_, __, ___) => Text(
-                      _diagMsg,
-                      style: const TextStyle(color: Colors.white54, fontSize: 10),
+                    builder: (_, __, ___) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_diagLine1, style: const TextStyle(color: Colors.white54, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        Text(_diagLine2, style: const TextStyle(color: Colors.white54, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ],
                     ),
                   ),
                 ),
