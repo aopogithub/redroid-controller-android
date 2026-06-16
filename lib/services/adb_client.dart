@@ -127,12 +127,7 @@ class AdbClient {
     }
     await sendMessage(cmdClse, localId, openResp.arg0, null);
     // Read server's final CLSE with short timeout (daemon may not send it)
-    try {
-      await Future.any([
-        readMessage(),
-        Future.delayed(const Duration(seconds: 1)),
-      ]);
-    } catch (_) {}
+    try { await _readMessageTimeout(const Duration(milliseconds: 500)); } catch (_) {}
     return utf8.decode(output.toBytes(), allowMalformed: true).trim();
   }
 
@@ -281,6 +276,32 @@ class AdbClient {
         _waiters.remove(c);
         throw TimeoutException('Read timeout');
       });
+    }
+    return _take(count);
+  }
+
+  /// Read one ADB message with a short timeout. Properly cancels pending reads.
+  Future<void> _readMessageTimeout(Duration timeout) async {
+    final header = await _readExactTimeout(24, timeout);
+    final bd = header.buffer.asByteData();
+    final dataLen = bd.getUint32(12, Endian.little);
+    if (dataLen > 0) await _readExactTimeout(dataLen, timeout);
+  }
+
+  Future<Uint8List> _readExactTimeout(int count, Duration timeout) async {
+    while (_buffer.length < count) {
+      if (_socketClosed) throw Exception('Socket closed');
+      final c = Completer<void>();
+      _waiters.add(c);
+      try {
+        await c.future.timeout(timeout, onTimeout: () {
+          _waiters.remove(c);
+          throw TimeoutException('Short timeout');
+        });
+      } catch (e) {
+        _waiters.remove(c);
+        rethrow;
+      }
     }
     return _take(count);
   }
