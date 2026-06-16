@@ -125,10 +125,29 @@ class ScrcpyConnection with ChangeNotifier {
           .catchError((_) => '');
       await Future.delayed(const Duration(milliseconds: 200));
 
-      // Step 3: Push jar (always overwrite)
-      _log('③ 推送 jar 到设备 ...');
-      await AdbClient.pushFileTo(host, port, jarFile.readAsBytesSync(), "/data/local/tmp/scrcpy-server.jar");
-      _log('  → 推送成功');
+      // Step 3: Push jar (skip if same size already on device)
+      _log('③ 检查 jar ...');
+      final jarBytes = jarFile.readAsBytesSync();
+      final jarSize = jarBytes.length;
+      var needPush = true;
+      try {
+        final lsResult = await AdbClient.execShell(host, port, 'wc -c < /data/local/tmp/scrcpy-server.jar 2>/dev/null')
+            .timeout(const Duration(seconds: 2), onTimeout: () => '');
+        final remoteSize = int.tryParse(lsResult.trim());
+        if (remoteSize == jarSize) {
+          needPush = false;
+          _log('  → 已存在 (${jarSize}B)，跳过推送');
+        } else {
+          _log('  → 大小不同 local=$jarSize remote=$remoteSize，需要推送');
+        }
+      } catch (e) {
+        _log('  → 检查失败，推送: $e');
+      }
+      if (needPush) {
+        _log('  → 推送 jar ($jarSize B) ...');
+        await AdbClient.pushFileTo(host, port, jarBytes, '/data/local/tmp/scrcpy-server.jar');
+        _log('  → 推送成功');
+      }
 
       // Step 4: Query device resolution via ADB
       _log('④b 查询设备分辨率 ...');
