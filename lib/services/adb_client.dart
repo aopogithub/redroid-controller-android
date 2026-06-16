@@ -126,7 +126,13 @@ class AdbClient {
       }
     }
     await sendMessage(cmdClse, localId, openResp.arg0, null);
-    try { await readMessage(); } catch (_) {}
+    // Read server's final CLSE with short timeout (daemon may not send it)
+    try {
+      await Future.any([
+        readMessage(),
+        Future.delayed(const Duration(seconds: 1)),
+      ]);
+    } catch (_) {}
     return utf8.decode(output.toBytes(), allowMalformed: true).trim();
   }
 
