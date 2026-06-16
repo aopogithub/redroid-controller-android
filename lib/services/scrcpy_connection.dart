@@ -202,7 +202,7 @@ class ScrcpyConnection with ChangeNotifier {
       final serverCnxnResp = await _recvAdbMsg(serverReader);
       if (serverCnxnResp.cmd != CNXN_V) throw Exception('Server CNXN failed');
 
-      final serverCmd = 'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 2.6.1 scid=$scid log_level=info video=true audio=false control=true tunnel_forward=true cleanup=false send_frame_meta=true send_dummy_byte=false send_codec_meta=false send_device_meta=true';
+      final serverCmd = 'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 2.6.1 scid=$scid log_level=info video=true audio=false control=true tunnel_forward=true cleanup=false send_frame_meta=true send_dummy_byte=false send_codec_meta=false send_device_meta=true max_fps=30 video_bit_rate=4000000';
       _log('  → shell: $serverCmd');
       await _sendAdbMsg(serverSocket, OPEN_V, 1, 0, utf8.encode('shell:$serverCmd\x00'));
       final serverOpenResp = await _recvAdbMsg(serverReader);
