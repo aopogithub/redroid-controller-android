@@ -201,6 +201,18 @@ class AdbClient {
     try { await readMessage(); } catch (_) {}
   }
 
+  /// Execute shell command on existing connection (no reconnect).
+  Future<String> shell(String command) async {
+    _ensureConnected();
+    return await _shellExecInternal(command);
+  }
+
+  /// Push file on existing connection (no reconnect).
+  Future<void> push(List<int> data, String remotePath) async {
+    _ensureConnected();
+    await _pushFileInternal(data, remotePath);
+  }
+
   // ── Static convenience ──
 
   static Future<String> execShell(String host, int port, String command) async {

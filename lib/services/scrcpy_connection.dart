@@ -119,78 +119,81 @@ class ScrcpyConnection with ChangeNotifier {
       const socketName = 'scrcpy';
       _log('  → scid=$scid (default socket), socketName=$socketName');
 
-      // Step 2: Kill any existing scrcpy server (fire-and-forget, non-blocking)
-      AdbClient.execShell(host, port, 'pkill -9 -f scrcpy 2>/dev/null')
-          .timeout(const Duration(seconds: 2), onTimeout: () => '')
-          .catchError((_) => '');
-      await Future.delayed(const Duration(milliseconds: 200));
+      // Shared ADB connection for all setup operations
+      final adb = AdbClient();
+      await adb.connect(host, port);
+      _log('  → ADB 已连接');
 
-      // Step 3: Push jar (skip if same size already on device)
-      _log('③ 检查 jar ...');
-      final jarBytes = jarFile.readAsBytesSync();
-      final jarSize = jarBytes.length;
-      var needPush = true;
       try {
-        final lsResult = await AdbClient.execShell(host, port, 'wc -c < /data/local/tmp/scrcpy-server.jar 2>/dev/null')
-            .timeout(const Duration(seconds: 2), onTimeout: () => '');
-        final remoteSize = int.tryParse(lsResult.trim());
-        if (remoteSize == jarSize) {
-          needPush = false;
-          _log('  → 已存在 (${jarSize}B)，跳过推送');
-        } else {
-          _log('  → 大小不同 local=$jarSize remote=$remoteSize，需要推送');
+        // Step 2: Kill any existing scrcpy server
+        adb.shell('pkill -9 -f scrcpy 2>/dev/null')
+            .timeout(const Duration(seconds: 2), onTimeout: () => '')
+            .catchError((_) => '');
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        // Step 3: Push jar (skip if same size already on device)
+        _log('③ 检查 jar ...');
+        final jarBytes = jarFile.readAsBytesSync();
+        final jarSize = jarBytes.length;
+        var needPush = true;
+        try {
+          final lsResult = await adb.shell('wc -c < /data/local/tmp/scrcpy-server.jar 2>/dev/null')
+              .timeout(const Duration(seconds: 2), onTimeout: () => '');
+          final remoteSize = int.tryParse(lsResult.trim());
+          if (remoteSize == jarSize) {
+            needPush = false;
+            _log('  → 已存在 (${jarSize}B)，跳过推送');
+          } else {
+            _log('  → 大小不同 local=$jarSize remote=$remoteSize，需要推送');
+          }
+        } catch (e) {
+          _log('  → 检查失败，推送: $e');
         }
-      } catch (e) {
-        _log('  → 检查失败，推送: $e');
-      }
-      if (needPush) {
-        _log('  → 推送 jar ($jarSize B) ...');
-        await AdbClient.pushFileTo(host, port, jarBytes, '/data/local/tmp/scrcpy-server.jar');
-        _log('  → 推送成功');
-      }
-
-      // Step 4: Query device resolution via ADB
-      _log('④b 查询设备分辨率 ...');
-      int? queriedWidth, queriedHeight;
-      try {
-        final wmSize = await AdbClient.execShell(host, port, 'wm size')
-            .timeout(const Duration(seconds: 3), onTimeout: () => '');
-        _log('  → wm size: ${wmSize.trim()}');
-
-        // Parse: only use "Physical size" (ignore Override size)
-        final physicalMatch = RegExp(r'Physical size:\s*(\d+)x(\d+)').firstMatch(wmSize);
-        if (physicalMatch != null) {
-          queriedWidth = int.parse(physicalMatch.group(1)!);
-          queriedHeight = int.parse(physicalMatch.group(2)!);
-          _log('  → 设备分辨率: ${queriedWidth}x$queriedHeight');
+        if (needPush) {
+          _log('  → 推送 jar ($jarSize B) ...');
+          await adb.push(jarBytes, '/data/local/tmp/scrcpy-server.jar');
+          _log('  → 推送成功');
         }
 
-        // Check device orientation
-        final rotation = await AdbClient.execShell(host, port, 'dumpsys display | grep mCurrentOrientation')
-            .timeout(const Duration(seconds: 3), onTimeout: () => '');
-        _log('  → orientation: $rotation');
-        // If landscape (rotation contains "LANDSCAPE" or value is 1 or 3), swap w/h
-        if (rotation.contains('LANDSCAPE') || rotation.contains('mCurrentOrientation=1') || rotation.contains('mCurrentOrientation=3')) {
-          final tmp = queriedWidth;
-          queriedWidth = queriedHeight;
-          queriedHeight = tmp;
-          _log('  → 横屏，交换分辨率: ${queriedWidth}x$queriedHeight');
+        // Step 4: Query device resolution
+        _log('④ 查询设备分辨率 ...');
+        int? queriedWidth, queriedHeight;
+        try {
+          final wmSize = await adb.shell('wm size')
+              .timeout(const Duration(seconds: 3), onTimeout: () => '');
+          _log('  → wm size: ${wmSize.trim()}');
+          final physicalMatch = RegExp(r'Physical size:\s*(\d+)x(\d+)').firstMatch(wmSize);
+          if (physicalMatch != null) {
+            queriedWidth = int.parse(physicalMatch.group(1)!);
+            queriedHeight = int.parse(physicalMatch.group(2)!);
+            _log('  → 设备分辨率: ${queriedWidth}x$queriedHeight');
+          }
+          final rotation = await adb.shell('dumpsys display | grep mCurrentOrientation')
+              .timeout(const Duration(seconds: 3), onTimeout: () => '');
+          _log('  → orientation: $rotation');
+          if (rotation.contains('LANDSCAPE') || rotation.contains('mCurrentOrientation=1') || rotation.contains('mCurrentOrientation=3')) {
+            final tmp = queriedWidth;
+            queriedWidth = queriedHeight;
+            queriedHeight = tmp;
+            _log('  → 横屏，交换分辨率: ${queriedWidth}x$queriedHeight');
+          }
+        } catch (e) {
+          _log('  → 查询分辨率失败: $e');
         }
-      } catch (e) {
-        _log('  → 查询分辨率失败: $e');
+        if (queriedWidth != null && queriedHeight != null) {
+          _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: queriedWidth!, videoHeight: queriedHeight!);
+          _deviceInfoController.add(_deviceInfo!);
+          _log('  → DeviceInfo 已设置: ${queriedWidth}x$queriedHeight');
+        }
+
+        // Step 5: Start scrcpy server (separate connection, stays alive)
+        _log('⑤ 启动 scrcpy server ...');
+      } finally {
+        // Close setup ADB connection
+        adb.disconnect();
       }
 
-      // Set DeviceInfo early with wm size result
-      if (queriedWidth != null && queriedHeight != null) {
-        _deviceInfo = DeviceInfo(deviceName: 'redroid', videoWidth: queriedWidth!, videoHeight: queriedHeight!);
-        _deviceInfoController.add(_deviceInfo!);
-        _log('  → DeviceInfo 已设置: ${queriedWidth}x$queriedHeight');
-      }
-
-      // Step 5: Start scrcpy server with tunnel_forward=true
-      // Server creates abstract socket AND connects to it as client.
-      // We can then connect to the same socket via ADB protocol.
-      _log('⑤ 启动 scrcpy server ...');
+      // Server uses its own ADB connection (stays open for server output)
       final serverSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 10));
       final serverReader = _SocketReader(serverSocket);
       await _sendAdbMsg(serverSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
