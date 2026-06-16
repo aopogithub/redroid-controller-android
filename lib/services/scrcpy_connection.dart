@@ -111,7 +111,7 @@ class ScrcpyConnection with ChangeNotifier {
     if (_serverReady) {
       _log('快速重连 ...');
       try {
-        await _connectVideoAndControl(host, port, 'scrcpy');
+        await _connectVideoAndControl(host, port, 'scrcpy', maxRetries: 2);
         return;
       } catch (e) {
         _log('快速重连失败: $e，尝试完整初始化 ...');
@@ -236,12 +236,12 @@ class ScrcpyConnection with ChangeNotifier {
   }
 
   /// Connect video + control sockets and start reading frames.
-  Future<void> _connectVideoAndControl(String host, int port, String socketName, {int? queriedWidth, int? queriedHeight}) async {
-    // Step 6: Connect to abstract socket via ADB protocol (with quick retry)
+  Future<void> _connectVideoAndControl(String host, int port, String socketName, {int? queriedWidth, int? queriedHeight, int maxRetries = 5}) async {
+    // Step 6: Connect to abstract socket via ADB protocol
     _log('⑥ 连接 abstract socket ...');
     Socket? videoSocket;
     _SocketReader? videoReader;
-    for (var attempt = 1; attempt <= 5; attempt++) {
+    for (var attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         videoSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
         videoReader = _SocketReader(videoSocket);
@@ -258,12 +258,12 @@ class ScrcpyConnection with ChangeNotifier {
         _log('  → attempt $attempt: ${openResp.cmd == CLSE_V ? "CLSE" : "0x${openResp.cmd.toRadixString(16)}"}');
         videoSocket.destroy();
         videoSocket = null;
-        if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
+        if (attempt < maxRetries) await Future.delayed(const Duration(milliseconds: 300));
       } catch (e) {
         _log('  → attempt $attempt 错误: $e');
         videoSocket?.destroy();
         videoSocket = null;
-        if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
+        if (attempt < maxRetries) await Future.delayed(const Duration(milliseconds: 300));
       }
     }
     if (videoSocket == null || videoReader == null) {
@@ -815,9 +815,11 @@ class ScrcpyConnection with ChangeNotifier {
   void disconnect() {
     _controlSub?.cancel();
     _controlSub = null;
+    _controlSocket?.destroy();
     _controlSocket = null;
     _controlRemoteId = null;
     _deviceInfo = null;
+    _videoFrameController.add(Uint8List(0)); // signal to stop reading
     _updateState(ScrcpyState.disconnected);
   }
   /// Drain OKAY/CLSE responses from control connection

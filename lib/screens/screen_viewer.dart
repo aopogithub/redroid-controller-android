@@ -123,7 +123,7 @@ class _ScreenViewerState extends State<ScreenViewer> {
       widget.connection.stateStream.listen((state) {
         if (state == ScrcpyState.disconnected || state == ScrcpyState.error) {
           setState(() { _reconnecting = true; });
-          Future.delayed(const Duration(seconds: 3), () {
+          Future.delayed(const Duration(milliseconds: 500), () {
             if (mounted) {
               widget.connection.connect(host: widget.host, port: widget.port);
             }
