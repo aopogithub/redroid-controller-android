@@ -128,9 +128,7 @@ class ScrcpyConnection with ChangeNotifier {
 
       try {
         // Step 2: Kill any existing scrcpy server
-        await adb.shell('pkill -9 -f scrcpy 2>/dev/null')
-            .timeout(const Duration(seconds: 2), onTimeout: () => '')
-            .catchError((_) => '');
+        await adb.shell('pkill -9 -f scrcpy 2>/dev/null').catchError((_) => '');
         await Future.delayed(const Duration(milliseconds: 200));
 
         // Step 3: Push jar (skip if same size already on device)
@@ -139,8 +137,7 @@ class ScrcpyConnection with ChangeNotifier {
         final jarSize = jarBytes.length;
         var needPush = true;
         try {
-          final lsResult = await adb.shell('wc -c < /data/local/tmp/scrcpy-server.jar 2>/dev/null')
-              .timeout(const Duration(seconds: 2), onTimeout: () => '');
+          final lsResult = await adb.shell('wc -c < /data/local/tmp/scrcpy-server.jar 2>/dev/null');
           final remoteSize = int.tryParse(lsResult.trim());
           if (remoteSize == jarSize) {
             needPush = false;
@@ -160,8 +157,7 @@ class ScrcpyConnection with ChangeNotifier {
         // Step 4: Query device resolution
         _log('④ 查询设备分辨率 ...');
         try {
-          final wmSize = await adb.shell('wm size')
-              .timeout(const Duration(seconds: 3), onTimeout: () => '');
+          final wmSize = await adb.shell('wm size');
           _log('  → wm size: ${wmSize.trim()}');
           final physicalMatch = RegExp(r'Physical size:\s*(\d+)x(\d+)').firstMatch(wmSize);
           if (physicalMatch != null) {
@@ -169,8 +165,7 @@ class ScrcpyConnection with ChangeNotifier {
             queriedHeight = int.parse(physicalMatch.group(2)!);
             _log('  → 设备分辨率: ${queriedWidth}x$queriedHeight');
           }
-          final rotation = await adb.shell('dumpsys display | grep mCurrentOrientation')
-              .timeout(const Duration(seconds: 3), onTimeout: () => '');
+          final rotation = await adb.shell('dumpsys display | grep mCurrentOrientation');
           _log('  → orientation: $rotation');
           if (rotation.contains('LANDSCAPE') || rotation.contains('mCurrentOrientation=1') || rotation.contains('mCurrentOrientation=3')) {
             final tmp = queriedWidth;
