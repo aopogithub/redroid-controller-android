@@ -103,11 +103,10 @@ class _ScreenViewerState extends State<ScreenViewer> {
         }
         final decodeMs = (_decodeTimeUs / 1000).toStringAsFixed(1);
         final maxDecodeMs = (_maxDecodeUs / 1000).toStringAsFixed(0);
-        _diagLine1 = 'in=${_currentInFps.toStringAsFixed(0)}fps '
-            'out=${_currentFps.toStringAsFixed(0)}fps '
-            'skip=$_skippedCount '
+        _diagLine1 = 'in=$_frameCount out=$_renderedCount skip=$_skippedCount '
             '${_screenSize.width.toInt()}x${_screenSize.height.toInt()}';
-        _diagLine2 = 'decode=${decodeMs}ms(max=${maxDecodeMs}) '
+        _diagLine2 = 'fps=${_currentFps.toStringAsFixed(0)} '
+            'decode=${decodeMs}ms(max=${maxDecodeMs}) '
             'interval=${(_frameIntervalUs / 1000).toStringAsFixed(0)}ms';
         _maxDecodeUs = 0;
         _diagTick.value++;

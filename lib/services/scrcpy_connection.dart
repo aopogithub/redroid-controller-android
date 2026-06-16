@@ -188,17 +188,13 @@ class ScrcpyConnection with ChangeNotifier {
       // Read server output in background
       _readServerOutput(serverReader, serverSocket);
 
-      // Wait for server to start
-      _log('  → 等待 server 启动 ...');
-      await Future.delayed(const Duration(seconds: 2));
-
-      // Step 6: Connect to abstract socket via ADB protocol (with retry)
+      // Step 6: Connect to abstract socket via ADB protocol (with quick retry)
       _log('⑥ 连接 abstract socket ...');
       Socket? videoSocket;
       _SocketReader? videoReader;
-      for (var attempt = 1; attempt <= 3; attempt++) {
+      for (var attempt = 1; attempt <= 5; attempt++) {
         try {
-          videoSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 10));
+          videoSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
           videoReader = _SocketReader(videoSocket);
           await _sendAdbMsg(videoSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
           final cnxnResp = await _recvAdbMsg(videoReader);
@@ -213,12 +209,12 @@ class ScrcpyConnection with ChangeNotifier {
           _log('  → attempt $attempt: ${openResp.cmd == CLSE_V ? "CLSE" : "0x${openResp.cmd.toRadixString(16)}"}');
           videoSocket.destroy();
           videoSocket = null;
-          if (attempt < 3) await Future.delayed(const Duration(seconds: 2));
+          if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
         } catch (e) {
           _log('  → attempt $attempt 错误: $e');
           videoSocket?.destroy();
           videoSocket = null;
-          if (attempt < 3) await Future.delayed(const Duration(seconds: 2));
+          if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
         }
       }
       if (videoSocket == null || videoReader == null) {
