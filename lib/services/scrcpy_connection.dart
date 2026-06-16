@@ -80,6 +80,7 @@ class ScrcpyConnection with ChangeNotifier {
   DeviceInfo? _deviceInfo;
   String? _host;
   int _port = 5555;
+  bool _serverReady = false; // true after first successful setup (jar pushed, server started)
   Socket? _controlSocket;
   StreamSubscription? _controlSub;
   int? _controlRemoteId;
@@ -105,6 +106,18 @@ class ScrcpyConnection with ChangeNotifier {
     _host = host;
     _port = port;
     _updateState(ScrcpyState.connecting);
+
+    // Fast reconnect: server already set up, just connect to socket
+    if (_serverReady) {
+      _log('快速重连 ...');
+      try {
+        await _connectVideoAndControl(host, port, 'scrcpy');
+        return;
+      } catch (e) {
+        _log('快速重连失败: $e，尝试完整初始化 ...');
+        _serverReady = false;
+      }
+    }
 
     try {
       // Step 1: Write jar to local temp file
@@ -206,68 +219,9 @@ class ScrcpyConnection with ChangeNotifier {
       // Read server output in background
       _readServerOutput(serverReader, serverSocket);
 
-      // Step 6: Connect to abstract socket via ADB protocol (with quick retry)
-      _log('⑥ 连接 abstract socket ...');
-      Socket? videoSocket;
-      _SocketReader? videoReader;
-      for (var attempt = 1; attempt <= 5; attempt++) {
-        try {
-          videoSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
-          videoReader = _SocketReader(videoSocket);
-          await _sendAdbMsg(videoSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
-          final cnxnResp = await _recvAdbMsg(videoReader);
-          if (cnxnResp.cmd != CNXN_V) throw Exception('Video CNXN failed');
-
-          await _sendAdbMsg(videoSocket, OPEN_V, 2, 0, utf8.encode('localabstract:$socketName\x00'));
-          final openResp = await _recvAdbMsg(videoReader);
-          if (openResp.cmd == OKAY_V) {
-            _log('  ✓ 连接成功 (attempt $attempt)');
-            break;
-          }
-          _log('  → attempt $attempt: ${openResp.cmd == CLSE_V ? "CLSE" : "0x${openResp.cmd.toRadixString(16)}"}');
-          videoSocket.destroy();
-          videoSocket = null;
-          if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
-        } catch (e) {
-          _log('  → attempt $attempt 错误: $e');
-          videoSocket?.destroy();
-          videoSocket = null;
-          if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
-        }
-      }
-      if (videoSocket == null || videoReader == null) {
-        throw Exception('无法连接 abstract socket [$socketName]');
-      }
-
-      // Step 7: Open control connection
-      _log('⑦ 连接 control socket ...');
-      try {
-        final ctrlSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 10));
-        final ctrlReader = _SocketReader(ctrlSocket);
-
-        // ADB handshake
-        await _sendAdbMsg(ctrlSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
-        final cnxnResp = await _recvAdbMsg(ctrlReader);
-        if (cnxnResp.cmd != CNXN_V) throw Exception('Ctrl CNXN failed');
-
-        // Open abstract socket
-        await _sendAdbMsg(ctrlSocket, OPEN_V, 3, 0, utf8.encode('localabstract:$socketName\x00'));
-        final openResp = await _recvAdbMsg(ctrlReader);
-        if (openResp.cmd != OKAY_V) throw Exception('Ctrl OPEN failed');
-
-        _controlSocket = ctrlSocket;
-        _controlRemoteId = openResp.arg0;
-        _log('  ✓ control 已连接 (remote_id=$_controlRemoteId)');
-        _controlSub?.cancel();
-        _controlSub = ctrlSocket.listen((_) {}, onError: (_) {}, onDone: () {});
-      } catch (e) {
-        _log('  ⚠ control 错误: $e');
-      }
-
-      // Step 8: Read video data
-      _log('⑧ 读取视频数据...');
-      _updateState(ScrcpyState.connected);
-      _readVideoFramesFromAdb(videoReader, videoSocket, queriedWidth, queriedHeight);
+      // Step 6-8: Connect video + control + start reading
+      await _connectVideoAndControl(host, port, socketName, queriedWidth: queriedWidth, queriedHeight: queriedHeight);
+      _serverReady = true;
     } catch (e) {
       String msg;
       if (e is PlatformException) {
@@ -279,6 +233,70 @@ class ScrcpyConnection with ChangeNotifier {
       _updateState(ScrcpyState.error);
       disconnect();
     }
+  }
+
+  /// Connect video + control sockets and start reading frames.
+  Future<void> _connectVideoAndControl(String host, int port, String socketName, {int? queriedWidth, int? queriedHeight}) async {
+    // Step 6: Connect to abstract socket via ADB protocol (with quick retry)
+    _log('⑥ 连接 abstract socket ...');
+    Socket? videoSocket;
+    _SocketReader? videoReader;
+    for (var attempt = 1; attempt <= 5; attempt++) {
+      try {
+        videoSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 3));
+        videoReader = _SocketReader(videoSocket);
+        await _sendAdbMsg(videoSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
+        final cnxnResp = await _recvAdbMsg(videoReader);
+        if (cnxnResp.cmd != CNXN_V) throw Exception('Video CNXN failed');
+
+        await _sendAdbMsg(videoSocket, OPEN_V, 2, 0, utf8.encode('localabstract:$socketName\x00'));
+        final openResp = await _recvAdbMsg(videoReader);
+        if (openResp.cmd == OKAY_V) {
+          _log('  ✓ 连接成功 (attempt $attempt)');
+          break;
+        }
+        _log('  → attempt $attempt: ${openResp.cmd == CLSE_V ? "CLSE" : "0x${openResp.cmd.toRadixString(16)}"}');
+        videoSocket.destroy();
+        videoSocket = null;
+        if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        _log('  → attempt $attempt 错误: $e');
+        videoSocket?.destroy();
+        videoSocket = null;
+        if (attempt < 5) await Future.delayed(const Duration(milliseconds: 500));
+      }
+    }
+    if (videoSocket == null || videoReader == null) {
+      throw Exception('无法连接 abstract socket [$socketName]');
+    }
+
+    // Step 7: Open control connection
+    _log('⑦ 连接 control socket ...');
+    try {
+      final ctrlSocket = await Socket.connect(host, port, timeout: const Duration(seconds: 10));
+      final ctrlReader = _SocketReader(ctrlSocket);
+
+      await _sendAdbMsg(ctrlSocket, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
+      final cnxnResp = await _recvAdbMsg(ctrlReader);
+      if (cnxnResp.cmd != CNXN_V) throw Exception('Ctrl CNXN failed');
+
+      await _sendAdbMsg(ctrlSocket, OPEN_V, 3, 0, utf8.encode('localabstract:$socketName\x00'));
+      final openResp = await _recvAdbMsg(ctrlReader);
+      if (openResp.cmd != OKAY_V) throw Exception('Ctrl OPEN failed');
+
+      _controlSocket = ctrlSocket;
+      _controlRemoteId = openResp.arg0;
+      _log('  ✓ control 已连接 (remote_id=$_controlRemoteId)');
+      _controlSub?.cancel();
+      _controlSub = ctrlSocket.listen((_) {}, onError: (_) {}, onDone: () {});
+    } catch (e) {
+      _log('  ⚠ control 错误: $e');
+    }
+
+    // Step 8: Read video data
+    _log('⑧ 读取视频数据...');
+    _updateState(ScrcpyState.connected);
+    _readVideoFramesFromAdb(videoReader, videoSocket, queriedWidth, queriedHeight);
   }
 
   void _updateState(ScrcpyState s) { _state = s; _stateController.add(s); notifyListeners(); }
