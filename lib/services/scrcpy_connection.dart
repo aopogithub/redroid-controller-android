@@ -125,33 +125,10 @@ class ScrcpyConnection with ChangeNotifier {
           .catchError((_) => '');
       await Future.delayed(const Duration(milliseconds: 200));
 
-      // Step 3: Check if jar exists on device
-      _log('③ 检查设备上的 jar ...');
-      var jarExists = false;
-      try {
-        final lsResult = await AdbClient.execShell(host, port, 'ls -la /data/local/tmp/scrcpy-server.jar 2>/dev/null')
-            .timeout(const Duration(seconds: 3), onTimeout: () => '');
-        jarExists = lsResult.contains('scrcpy-server.jar');
-        _log('  → 设备上 jar: ${jarExists ? "已存在" : "不存在"}');
-        if (jarExists) {
-          _log('  → $lsResult');
-        }
-      } catch (e) {
-        _log('  → 检查失败: $e');
-      }
-
-      // Step 4: Push jar if not exists
-      if (!jarExists) {
-        _log('④ 推送 jar 到设备 ...');
-        await AdbClient.pushFileTo(host, port, jarFile.readAsBytesSync(), "/data/local/tmp/scrcpy-server.jar");
-        _log('  → 推送成功');
-        // Verify push
-        try {
-          final verify = await AdbClient.execShell(host, port, 'ls -la /data/local/tmp/scrcpy-server.jar');
-          _log('  → 验证: $verify');
-        } catch (_) {}
-      } else {
-        _log('④ 跳过推送 (jar 已存在)');
+      // Step 3: Push jar (always overwrite)
+      _log('③ 推送 jar 到设备 ...');
+      await AdbClient.pushFileTo(host, port, jarFile.readAsBytesSync(), "/data/local/tmp/scrcpy-server.jar");
+      _log('  → 推送成功');
       }
 
       // Step 4.5: Query device resolution via ADB
