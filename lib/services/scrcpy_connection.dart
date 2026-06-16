@@ -129,9 +129,8 @@ class ScrcpyConnection with ChangeNotifier {
       _log('③ 推送 jar 到设备 ...');
       await AdbClient.pushFileTo(host, port, jarFile.readAsBytesSync(), "/data/local/tmp/scrcpy-server.jar");
       _log('  → 推送成功');
-      }
 
-      // Step 4.5: Query device resolution via ADB
+      // Step 4: Query device resolution via ADB
       _log('④b 查询设备分辨率 ...');
       int? queriedWidth, queriedHeight;
       try {
