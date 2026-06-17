@@ -21,11 +21,28 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   bool _isConnecting = false;
   List<String> _logMessages = [];
   StreamSubscription? _errorSub;
+  ServerConfig _serverConfig = ServerConfig();
 
   @override
   void initState() {
     super.initState();
     _loadSavedDevices();
+    _loadServerConfig();
+  }
+
+  Future<void> _loadServerConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    final json = prefs.getString('server_config');
+    if (json != null) {
+      setState(() {
+        _serverConfig = ServerConfig.fromJson(jsonDecode(json));
+      });
+    }
+  }
+
+  Future<void> _saveServerConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('server_config', jsonEncode(_serverConfig.toJson()));
   }
 
   Future<void> _loadSavedDevices() async {
@@ -54,6 +71,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     _errorSub?.cancel();
 
     final conn = context.read<ScrcpyConnection>();
+    conn.config = _serverConfig;
 
     late StreamSubscription sub;
     sub = conn.stateStream.listen((state) {
@@ -136,9 +154,18 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                   children: [
                     const Icon(Icons.phone_android, size: 64, color: Colors.deepPurple),
                     const SizedBox(height: 12),
-                    const Text(
-                      'Redroid Controller',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          'Redroid Controller',
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.settings, color: Colors.grey),
+                          onPressed: _showSettings,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -275,6 +302,131 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                   ),
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSettings() {
+    final cfg = _serverConfig;
+    final waitController = TextEditingController(text: (cfg.serverWaitMs / 1000).toStringAsFixed(1));
+    final maxFpsController = TextEditingController(text: cfg.maxFps.toString());
+    final bitRateController = TextEditingController(text: (cfg.videoBitRate / 1000000).toStringAsFixed(1));
+    final bufferController = TextEditingController(text: cfg.videoBuffer.toString());
+    String selectedCodec = cfg.videoCodec;
+    String selectedEncoder = cfg.videoEncoder;
+
+    const codecs = ['h264', 'h265', 'av1'];
+    const encoders = [
+      'OMX.google.h264.encoder',
+      'OMX.google.h265.encoder',
+      'c2.android.av1.encoder',
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('服务器参数', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: waitController,
+                decoration: const InputDecoration(
+                  labelText: '等待 server 启动 (秒)',
+                  hintText: '1.0',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.timer),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: maxFpsController,
+                decoration: const InputDecoration(
+                  labelText: '最大帧率 (max_fps)',
+                  hintText: '30',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.speed),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: bitRateController,
+                decoration: const InputDecoration(
+                  labelText: '视频码率 (Mbps)',
+                  hintText: '4.0',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.high_quality),
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedCodec,
+                decoration: const InputDecoration(
+                  labelText: '视频编码 (video_codec)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.videocam),
+                ),
+                items: codecs.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                onChanged: (v) => setSheetState(() => selectedCodec = v!),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedEncoder,
+                decoration: const InputDecoration(
+                  labelText: '编码器 (video_encoder)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.memory),
+                ),
+                items: encoders.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13)))).toList(),
+                onChanged: (v) => setSheetState(() => selectedEncoder = v!),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: bufferController,
+                decoration: const InputDecoration(
+                  labelText: '视频缓冲 (video_buffer)',
+                  hintText: '0',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.storage),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () {
+                    cfg.serverWaitMs = ((double.tryParse(waitController.text) ?? 1.0) * 1000).toInt();
+                    cfg.maxFps = int.tryParse(maxFpsController.text) ?? 30;
+                    cfg.videoBitRate = ((double.tryParse(bitRateController.text) ?? 4.0) * 1000000).toInt();
+                    cfg.videoCodec = selectedCodec;
+                    cfg.videoEncoder = selectedEncoder;
+                    cfg.videoBuffer = int.tryParse(bufferController.text) ?? 0;
+                    _saveServerConfig();
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('设置已保存'), duration: Duration(seconds: 1)),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('保存'),
+                ),
+              ),
             ],
           ),
         ),

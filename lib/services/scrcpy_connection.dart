@@ -69,6 +69,43 @@ class _SocketReader {
   }
 }
 
+/// Server configuration parameters
+class ServerConfig {
+  int serverWaitMs;
+  int maxFps;
+  int videoBitRate;
+  String videoCodec;
+  String videoEncoder;
+  int videoBuffer;
+
+  ServerConfig({
+    this.serverWaitMs = 1000,
+    this.maxFps = 30,
+    this.videoBitRate = 4000000,
+    this.videoCodec = 'h264',
+    this.videoEncoder = 'OMX.google.h264.encoder',
+    this.videoBuffer = 0,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'serverWaitMs': serverWaitMs,
+    'maxFps': maxFps,
+    'videoBitRate': videoBitRate,
+    'videoCodec': videoCodec,
+    'videoEncoder': videoEncoder,
+    'videoBuffer': videoBuffer,
+  };
+
+  factory ServerConfig.fromJson(Map<String, dynamic> json) => ServerConfig(
+    serverWaitMs: json['serverWaitMs'] ?? 1000,
+    maxFps: json['maxFps'] ?? 30,
+    videoBitRate: json['videoBitRate'] ?? 4000000,
+    videoCodec: json['videoCodec'] ?? 'h264',
+    videoEncoder: json['videoEncoder'] ?? 'OMX.google.h264.encoder',
+    videoBuffer: json['videoBuffer'] ?? 0,
+  );
+}
+
 class ScrcpyConnection with ChangeNotifier {
   static const CNXN_V = 0x4e584e43;
   static const OPEN_V  = 0x4e45504f;
@@ -80,10 +117,11 @@ class ScrcpyConnection with ChangeNotifier {
   DeviceInfo? _deviceInfo;
   String? _host;
   int _port = 5555;
-  bool _serverReady = false; // true after first successful setup (jar pushed, server started)
+  bool _serverReady = false;
   Socket? _controlSocket;
   StreamSubscription? _controlSub;
   int? _controlRemoteId;
+  ServerConfig config = ServerConfig();
 
   final _stateController = StreamController<ScrcpyState>.broadcast();
   final _deviceInfoController = StreamController<DeviceInfo>.broadcast();
@@ -209,7 +247,8 @@ class ScrcpyConnection with ChangeNotifier {
       final serverCnxnResp = await _recvAdbMsg(serverReader);
       if (serverCnxnResp.cmd != CNXN_V) throw Exception('Server CNXN failed');
 
-      final serverCmd = 'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 4.0 scid=$scid log_level=info video=true audio=false control=true tunnel_forward=true cleanup=false send_frame_meta=true send_dummy_byte=false send_stream_meta=true send_device_meta=true max_fps=30 video_bit_rate=4000000';
+      final cfg = config;
+      final serverCmd = 'CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 4.0 scid=$scid log_level=info video=true audio=false control=true tunnel_forward=true cleanup=false send_frame_meta=true send_dummy_byte=false send_stream_meta=true send_device_meta=true max_fps=${cfg.maxFps} video_bit_rate=${cfg.videoBitRate} video_codec=${cfg.videoCodec} video_encoder=${cfg.videoEncoder} video_buffer=${cfg.videoBuffer}';
       _log('  → shell: $serverCmd');
       await _sendAdbMsg(serverSocket, OPEN_V, 1, 0, utf8.encode('shell:$serverCmd\x00'));
       final serverOpenResp = await _recvAdbMsg(serverReader);
@@ -219,8 +258,9 @@ class ScrcpyConnection with ChangeNotifier {
       // Wait for server to initialize (v4.0 jar is 732KB, needs time to start)
       // NOTE: Do NOT probe the abstract socket — it consumes the server's
       // accept() and breaks subsequent real connections.
-      _log('  → 等待 server 启动 (3s) ...');
-      await Future.delayed(const Duration(seconds: 3));
+      final waitSec = (cfg.serverWaitMs / 1000).toStringAsFixed(1);
+      _log('  → 等待 server 启动 (${waitSec}s) ...');
+      await Future.delayed(Duration(milliseconds: cfg.serverWaitMs));
 
       // Read server output in background
       _readServerOutput(serverReader, serverSocket);
