@@ -312,12 +312,27 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   void _showSettings() {
     final cfg = _serverConfig;
     final waitController = TextEditingController(text: (cfg.serverWaitMs / 1000).toStringAsFixed(1));
-    final maxFpsController = TextEditingController(text: cfg.maxFps.toString());
-    final bitRateController = TextEditingController(text: (cfg.videoBitRate / 1000000).toStringAsFixed(1));
-    final bufferController = TextEditingController(text: cfg.videoBuffer.toString());
+    int selectedFps = cfg.maxFps;
+    int selectedBitRate = cfg.videoBitRate;
+    int selectedBuffer = cfg.videoBuffer;
     String selectedCodec = cfg.videoCodec;
     String selectedEncoder = cfg.videoEncoder;
 
+    const fpsOptions = [15, 30, 60];
+    const bitRateOptions = [
+      {'label': '1 Mbps', 'value': 1000000},
+      {'label': '2 Mbps', 'value': 2000000},
+      {'label': '4 Mbps', 'value': 4000000},
+      {'label': '8 Mbps', 'value': 8000000},
+      {'label': '16 Mbps', 'value': 16000000},
+    ];
+    const bufferOptions = [
+      {'label': '关闭', 'value': 0},
+      {'label': '128 KB', 'value': 131072},
+      {'label': '256 KB', 'value': 262144},
+      {'label': '512 KB', 'value': 524288},
+      {'label': '1 MB', 'value': 1048576},
+    ];
     const codecs = ['h264', 'h265', 'av1'];
     const encoders = [
       'OMX.google.h264.encoder',
@@ -347,33 +362,61 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: maxFpsController,
-                decoration: const InputDecoration(
-                  labelText: '最大帧率 (max_fps)',
-                  hintText: '30',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.speed),
-                ),
-                keyboardType: TextInputType.number,
+              const SizedBox(height: 16),
+              const Text('帧率', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: fpsOptions.map((fps) {
+                  final selected = selectedFps == fps;
+                  return ChoiceChip(
+                    label: Text('$fps fps'),
+                    selected: selected,
+                    onSelected: (_) => setSheetState(() => selectedFps = fps),
+                    selectedColor: Colors.deepPurple,
+                    labelStyle: TextStyle(color: selected ? Colors.white : null),
+                  );
+                }).toList(),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bitRateController,
-                decoration: const InputDecoration(
-                  labelText: '视频码率 (Mbps)',
-                  hintText: '4.0',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.high_quality),
-                ),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              const SizedBox(height: 16),
+              const Text('码率', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: bitRateOptions.map((opt) {
+                  final v = opt['value'] as int;
+                  final selected = selectedBitRate == v;
+                  return ChoiceChip(
+                    label: Text(opt['label'] as String),
+                    selected: selected,
+                    onSelected: (_) => setSheetState(() => selectedBitRate = v),
+                    selectedColor: Colors.deepPurple,
+                    labelStyle: TextStyle(color: selected ? Colors.white : null),
+                  );
+                }).toList(),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
+              const Text('缓冲', style: TextStyle(fontSize: 13, color: Colors.grey)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: bufferOptions.map((opt) {
+                  final v = opt['value'] as int;
+                  final selected = selectedBuffer == v;
+                  return ChoiceChip(
+                    label: Text(opt['label'] as String),
+                    selected: selected,
+                    onSelected: (_) => setSheetState(() => selectedBuffer = v),
+                    selectedColor: Colors.deepPurple,
+                    labelStyle: TextStyle(color: selected ? Colors.white : null),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 value: selectedCodec,
                 decoration: const InputDecoration(
-                  labelText: '视频编码 (video_codec)',
+                  labelText: '视频编码',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.videocam),
                 ),
@@ -384,23 +427,12 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               DropdownButtonFormField<String>(
                 value: selectedEncoder,
                 decoration: const InputDecoration(
-                  labelText: '编码器 (video_encoder)',
+                  labelText: '编码器',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.memory),
                 ),
                 items: encoders.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13)))).toList(),
                 onChanged: (v) => setSheetState(() => selectedEncoder = v!),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bufferController,
-                decoration: const InputDecoration(
-                  labelText: '视频缓冲 (video_buffer)',
-                  hintText: '0',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.storage),
-                ),
-                keyboardType: TextInputType.number,
               ),
               const SizedBox(height: 20),
               SizedBox(
@@ -409,11 +441,11 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 child: ElevatedButton(
                   onPressed: () {
                     cfg.serverWaitMs = ((double.tryParse(waitController.text) ?? 1.0) * 1000).toInt();
-                    cfg.maxFps = int.tryParse(maxFpsController.text) ?? 30;
-                    cfg.videoBitRate = ((double.tryParse(bitRateController.text) ?? 4.0) * 1000000).toInt();
+                    cfg.maxFps = selectedFps;
+                    cfg.videoBitRate = selectedBitRate;
                     cfg.videoCodec = selectedCodec;
                     cfg.videoEncoder = selectedEncoder;
-                    cfg.videoBuffer = int.tryParse(bufferController.text) ?? 0;
+                    cfg.videoBuffer = selectedBuffer;
                     _saveServerConfig();
                     Navigator.pop(ctx);
                     ScaffoldMessenger.of(context).showSnackBar(
