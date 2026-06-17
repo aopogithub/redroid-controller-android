@@ -32,6 +32,7 @@ class _ScreenViewerState extends State<ScreenViewer> {
   int _touchWidth = 0;
   int _touchHeight = 0;
   bool _reconnecting = false;
+  bool _showDebugOverlay = true;
 
   // Perf counters
   int _frameCount = 0;
@@ -186,7 +187,7 @@ class _ScreenViewerState extends State<ScreenViewer> {
                         ),
                       ),
               ),
-              if (_isInitialized)
+              if (_isInitialized && _showDebugOverlay)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -339,6 +340,16 @@ class _ScreenViewerState extends State<ScreenViewer> {
       }),
       ListTile(leading: const Icon(Icons.power_settings_new, color: Colors.red), title: const Text('唤醒屏幕'), onTap: () { widget.connection.sendBackOrScreenOn(); Navigator.pop(context); }),
       ListTile(leading: const Icon(Icons.info_outline), title: const Text('设备信息'), subtitle: Text('${_screenSize.width.toInt()}x${_screenSize.height.toInt()}')),
+      const Divider(),
+      CheckboxListTile(
+        secondary: const Icon(Icons.bug_report, color: Colors.orange),
+        title: const Text('调试信息'),
+        value: _showDebugOverlay,
+        onChanged: (v) {
+          setState(() => _showDebugOverlay = v ?? true);
+          Navigator.pop(context);
+        },
+      ),
     ];
   }
 
