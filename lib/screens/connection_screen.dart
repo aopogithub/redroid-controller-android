@@ -362,57 +362,40 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                 ),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
               ),
-              const SizedBox(height: 16),
-              const Text('帧率', style: TextStyle(fontSize: 13, color: Colors.grey)),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                children: fpsOptions.map((fps) {
-                  final selected = selectedFps == fps;
-                  return ChoiceChip(
-                    label: Text('$fps fps'),
-                    selected: selected,
-                    onSelected: (_) => setSheetState(() => selectedFps = fps),
-                    selectedColor: Colors.deepPurple,
-                    labelStyle: TextStyle(color: selected ? Colors.white : null),
-                  );
-                }).toList(),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                value: selectedFps,
+                decoration: const InputDecoration(
+                  labelText: '帧率',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.speed),
+                ),
+                items: fpsOptions.map((fps) => DropdownMenuItem(value: fps, child: Text('$fps fps'))).toList(),
+                onChanged: (v) => setSheetState(() => selectedFps = v!),
               ),
-              const SizedBox(height: 16),
-              const Text('码率', style: TextStyle(fontSize: 13, color: Colors.grey)),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                children: bitRateOptions.map((opt) {
-                  final v = opt['value'] as int;
-                  final selected = selectedBitRate == v;
-                  return ChoiceChip(
-                    label: Text(opt['label'] as String),
-                    selected: selected,
-                    onSelected: (_) => setSheetState(() => selectedBitRate = v),
-                    selectedColor: Colors.deepPurple,
-                    labelStyle: TextStyle(color: selected ? Colors.white : null),
-                  );
-                }).toList(),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                value: selectedBitRate,
+                decoration: const InputDecoration(
+                  labelText: '码率',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.high_quality),
+                ),
+                items: bitRateOptions.map((opt) => DropdownMenuItem(value: opt['value'] as int, child: Text(opt['label'] as String))).toList(),
+                onChanged: (v) => setSheetState(() => selectedBitRate = v!),
               ),
-              const SizedBox(height: 16),
-              const Text('缓冲', style: TextStyle(fontSize: 13, color: Colors.grey)),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                children: bufferOptions.map((opt) {
-                  final v = opt['value'] as int;
-                  final selected = selectedBuffer == v;
-                  return ChoiceChip(
-                    label: Text(opt['label'] as String),
-                    selected: selected,
-                    onSelected: (_) => setSheetState(() => selectedBuffer = v),
-                    selectedColor: Colors.deepPurple,
-                    labelStyle: TextStyle(color: selected ? Colors.white : null),
-                  );
-                }).toList(),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                value: selectedBuffer,
+                decoration: const InputDecoration(
+                  labelText: '缓冲',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.storage),
+                ),
+                items: bufferOptions.map((opt) => DropdownMenuItem(value: opt['value'] as int, child: Text(opt['label'] as String))).toList(),
+                onChanged: (v) => setSheetState(() => selectedBuffer = v!),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: selectedCodec,
                 decoration: const InputDecoration(
