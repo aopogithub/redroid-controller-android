@@ -216,28 +216,11 @@ class ScrcpyConnection with ChangeNotifier {
       if (serverOpenResp.cmd != OKAY_V) throw Exception('Server OPEN failed');
       _log('  → server 命令已发送');
 
-      // Wait for server to initialize (poll socket, max 3s)
-      _log('  → 等待 server 就绪 ...');
-      for (var i = 0; i < 15; i++) {
-        await Future.delayed(const Duration(milliseconds: 200));
-        try {
-          final probe = await Socket.connect(host, port, timeout: const Duration(seconds: 1));
-          await _sendAdbMsg(probe, CNXN_V, 0x01000001, 4096, utf8.encode('host::features=shell_v2,cmd\x00'));
-          final resp = await _recvAdbMsg(_SocketReader(probe)).timeout(const Duration(seconds: 1));
-          if (resp.cmd == CNXN_V) {
-            await _sendAdbMsg(probe, OPEN_V, 99, 0, utf8.encode('localabstract:$socketName\x00'));
-            final openResp = await _recvAdbMsg(_SocketReader(probe)).timeout(const Duration(seconds: 1));
-            probe.destroy();
-            if (openResp.cmd == OKAY_V || openResp.cmd == CLSE_V) {
-              _log('  → server 就绪 (${(i + 1) * 200}ms)');
-              break;
-            }
-          }
-          probe.destroy();
-        } catch (_) {
-          // Server not ready yet, keep waiting
-        }
-      }
+      // Wait for server to initialize (v4.0 jar is 732KB, needs time to start)
+      // NOTE: Do NOT probe the abstract socket — it consumes the server's
+      // accept() and breaks subsequent real connections.
+      _log('  → 等待 server 启动 (3s) ...');
+      await Future.delayed(const Duration(seconds: 3));
 
       // Read server output in background
       _readServerOutput(serverReader, serverSocket);
